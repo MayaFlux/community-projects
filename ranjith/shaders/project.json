@@ -1,0 +1,6 @@
+{
+  "name": "Curated Shaders",
+  "themes": ["shaders", "compute", "graphics", "temporal"],
+  "description": "Reusable compute and fragment shaders for temporal images, layered composition, tile rearrangement, proximity graphs, and instance animation.",
+  "min_mayaflux_version": "0.5.0"
+}
