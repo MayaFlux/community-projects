@@ -1,0 +1,6 @@
+{
+  "name": "Topsoil",
+  "themes": ["cellular-automata", "generative", "audiovisual", "drone"],
+  "description": "A machine of pure tones, clicks and noise scored by cellular automata over a ringing drone, with a living terrain of Life-like colonies that answers it late and in its own way.",
+  "min_mayaflux_version": "0.5.0"
+}

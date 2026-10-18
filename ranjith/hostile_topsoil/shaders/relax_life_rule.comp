@@ -1,0 +1,213 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) buffer StateIn {
+    vec4 state_in[];
+};
+layout(set = 0, binding = 1, std430) buffer StateOut {
+    vec4 state_out[];
+};
+
+layout(push_constant) uniform PC {
+    uint width;
+    uint height;
+    uint wrap;
+    float territory;
+    float phase;
+    float drift;
+    float deposit;
+    float diffuse;
+    float talus;
+    float slide;
+    float trail_decay;
+    float subside;
+    float spore;
+    float events[16];
+} pc;
+
+/**
+ * @brief Many species of Life over one relaxing height field.
+ *
+ * Cell state is (height, age, trail, species).
+ *
+ * The plane is divided into territories by the nearest of jittered sites, one
+ * per territory of about pc.territory cells across. The sites drift with
+ * pc.phase, so borders migrate and a cell can change species under a living
+ * colony. Each territory has a species in [0, 1) which picks one of twelve
+ * Life-like rules, how strongly its colonies build or erode the ground
+ * (deposit is scaled by it, and may be negative), and the range of heights it
+ * can be born in. A territory of zero or less is a single Conway species with
+ * every height fertile.
+ *
+ * age is 0 for a dead cell and counts generations lived. trail is 1 under a
+ * live cell and decays geometrically, so it remembers where life has been.
+ * The ground relaxes by diffuse toward the neighbour mean and slides off
+ * slopes steeper than talus; subside returns a fraction of the height to zero.
+ * spore is the chance per generation that a dead cell without a trail is born
+ * anyway, which keeps every territory seeded. events holds four (x, y, radius,
+ * strength) records in cells. Inside the radius of a record, a positive strength
+ * is the chance that a cell is born, and a negative one raises the height by
+ * its magnitude, falling off to the rim. The footprint is not a disc: each record
+ * is turned, squashed, lobed and ragged by hashes of its own centre. A radius of
+ * zero is an empty record.
+ * wrap selects a torus; otherwise
+ * cells outside the grid repeat the nearest edge cell.
+ */
+const uvec2 RULES[12] = uvec2[12](
+    uvec2(8u, 12u),
+    uvec2(72u, 12u),
+    uvec2(456u, 472u),
+    uvec2(4u, 0u),
+    uvec2(8u, 62u),
+    uvec2(8u, 496u),
+    uvec2(464u, 488u),
+    uvec2(170u, 170u),
+    uvec2(72u, 38u),
+    uvec2(328u, 52u),
+    uvec2(488u, 480u),
+    uvec2(168u, 298u));
+
+uint pcg(uint v) {
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+float hash01(uint v) {
+    return float(pcg(v)) / 4294967296.0;
+}
+
+float species_at(uint ix, uint iy) {
+    if (pc.territory <= 0.0) return 0.0;
+
+    vec2 cells = max(floor(vec2(pc.width, pc.height) / pc.territory), vec2(1.0));
+    vec2 size = vec2(pc.width, pc.height) / cells;
+    vec2 p = vec2(ix, iy) + 0.5;
+    ivec2 c = ivec2(floor(p / size));
+    ivec2 n = ivec2(cells);
+
+    float best = 1e30;
+    float species = 0.0;
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            ivec2 cc = c + ivec2(i, j);
+            ivec2 wc = ((cc % n) + n) % n;
+            uint key = uint(wc.y) * 8191u + uint(wc.x) * 131u + 17u;
+            vec2 jitter = vec2(hash01(key), hash01(key + 1u)) - 0.5;
+            vec2 turn = vec2(hash01(key + 2u), hash01(key + 3u)) * 6.2831853;
+            vec2 wander = vec2(sin(pc.phase * 0.11 + turn.x), cos(pc.phase * 0.13 + turn.y));
+            vec2 site = (vec2(cc) + 0.5 + jitter * 0.8 + wander * pc.drift) * size;
+            vec2 d = site - p;
+            float dd = dot(d, d);
+            if (dd < best) {
+                best = dd;
+                species = hash01(key + 4u);
+            }
+        }
+    }
+    return species;
+}
+
+vec4 fetch(int x, int y) {
+    if (pc.wrap != 0u) {
+        x = (x + int(pc.width)) % int(pc.width);
+        y = (y + int(pc.height)) % int(pc.height);
+    } else {
+        x = clamp(x, 0, int(pc.width) - 1);
+        y = clamp(y, 0, int(pc.height) - 1);
+    }
+    return state_in[uint(y) * pc.width + uint(x)];
+}
+
+void main() {
+    uint ix = gl_GlobalInvocationID.x;
+    uint iy = gl_GlobalInvocationID.y;
+    if (ix >= pc.width || iy >= pc.height) return;
+
+    uint idx = iy * pc.width + ix;
+    vec4 self = state_in[idx];
+
+    float species = species_at(ix, iy);
+    bool single = pc.territory <= 0.0;
+    uvec2 rule = RULES[min(uint(species * 12.0), 11u)];
+    float band_lo = single ? 0.0 : fract(species * 37.0) * 0.5;
+    float band_hi = single ? 1.0 : band_lo + 0.35 + fract(species * 91.0) * 0.4;
+    float build = single ? 1.0 : mix(-0.4, 1.6, fract(species * 53.0));
+
+    uint count = 0u;
+    float spread = 0.0;
+    float flow = 0.0;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = int(ix) + dx;
+            int ny = int(iy) + dy;
+            bool outside = nx < 0 || ny < 0 || nx >= int(pc.width) || ny >= int(pc.height);
+            vec4 n = fetch(nx, ny);
+            if (pc.wrap != 0u || !outside) {
+                if (n.y > 0.5) count++;
+            }
+            float reach = (dx != 0 && dy != 0) ? 0.70710678 : 1.0;
+            float d = n.x - self.x;
+            spread += d * reach;
+            flow += reach * (max(d - pc.talus, 0.0) - max(-d - pc.talus, 0.0));
+        }
+    }
+
+    float age = self.y;
+    if (age > 0.5) {
+        age = ((rule.y >> count) & 1u) != 0u ? age + 1.0 : 0.0;
+    } else {
+        bool fertile = self.x >= band_lo && self.x <= band_hi;
+        age = (fertile && ((rule.x >> count) & 1u) != 0u) ? 1.0 : 0.0;
+        if (age < 0.5 && pc.spore > 0.0 && self.z < 0.01) {
+            age = hash01(idx * 2654435761u + floatBitsToUint(pc.phase)) < pc.spore ? 1.0 : 0.0;
+        }
+    }
+
+    float trail = age > 0.5 ? 1.0 : self.z * pc.trail_decay;
+
+    float h = self.x;
+    h += pc.deposit * build * (age > 0.5 ? 1.0 : 0.0) * (build > 0.0 ? (1.0 - h) : h);
+    h += pc.diffuse * spread * 0.125;
+    h += pc.slide * flow * 0.125;
+    h -= pc.subside * h;
+    h = clamp(h, 0.0, 1.0);
+
+    for (uint e = 0u; e < 4u; ++e) {
+        vec2 centre = vec2(pc.events[e * 4u], pc.events[e * 4u + 1u]);
+        float radius = pc.events[e * 4u + 2u];
+        float strength = pc.events[e * 4u + 3u];
+        if (radius <= 0.0) continue;
+
+        vec2 delta = vec2(ix, iy) + 0.5 - centre;
+        if (pc.wrap != 0u) {
+            vec2 span = vec2(pc.width, pc.height);
+            delta -= span * round(delta / span);
+        }
+
+        uint key = floatBitsToUint(centre.x) ^ (floatBitsToUint(centre.y) * 2654435761u) ^ (e * 40503u);
+        float turn = hash01(key) * 3.14159265;
+        float squash = 0.4 + 0.6 * hash01(key + 1u);
+        vec2 q = vec2(cos(turn) * delta.x + sin(turn) * delta.y, -sin(turn) * delta.x + cos(turn) * delta.y);
+        q.y /= squash;
+
+        float phi = atan(q.y, q.x);
+        float lobes = 1.0 + 0.35 * sin(3.0 * phi + hash01(key + 2u) * 6.2831853) + 0.2 * sin(5.0 * phi + hash01(key + 3u) * 6.2831853);
+        float dist = length(q) / lobes * (0.8 + 0.4 * hash01(idx * 3266489917u + key));
+        if (dist > radius) continue;
+
+        float fall = 1.0 - dist / radius;
+        if (strength > 0.0) {
+            if (hash01(idx * 2246822519u + e * 3266489917u + floatBitsToUint(pc.phase)) < strength) {
+                age = 1.0;
+                trail = 1.0;
+            }
+        } else {
+            h = clamp(h - strength * fall * fall, 0.0, 1.0);
+        }
+    }
+
+    state_out[idx] = vec4(h, age, trail, species);
+}

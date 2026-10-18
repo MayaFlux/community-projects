@@ -1,0 +1,96 @@
+#version 460
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer CellState {
+    vec4 cell_state[];
+};
+layout(set = 0, binding = 1, std430) writeonly buffer Vertices {
+    float vertices[];
+};
+
+layout(push_constant) uniform PC {
+    uint width;
+    uint height;
+    float extent;
+    float point_size;
+    float relief;
+    float sun_x;
+    float sun_y;
+} pc;
+
+/**
+ * @brief Emit one packed 60-byte Kakshya::Vertex per cell, as a stained specimen.
+ *
+ * Cell state is (height, age, trail, species). Each species has its own stain,
+ * a vivid hue from a cosine palette. Live cells glow in their stain, white
+ * while newborn. The trail keeps a dim halo of the stain where life has been.
+ * The ground is shown only as faint relief, lit from (sun_x, sun_y) with the
+ * normal taken from the height gradient scaled by relief, on a blue black
+ * field. A lens vignette darkens the edge, and point size swells slightly
+ * with height. The normal is written to the vertex normal.
+ */
+float h_at(int x, int y) {
+    x = clamp(x, 0, int(pc.width) - 1);
+    y = clamp(y, 0, int(pc.height) - 1);
+    return cell_state[uint(y) * pc.width + uint(x)].x;
+}
+
+vec3 stain(float species) {
+    return 0.55 + 0.45 * cos(6.2831853 * (species * 3.0 + vec3(0.0, 0.33, 0.67)));
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.width * pc.height) return;
+
+    int ix = int(i % pc.width);
+    int iy = int(i / pc.width);
+
+    float fx = (float(ix) + 0.5) / float(pc.width);
+    float fy = (float(iy) + 0.5) / float(pc.height);
+
+    vec4 s = cell_state[i];
+
+    float dx = (h_at(ix + 1, iy) - h_at(ix - 1, iy)) * 0.5 * pc.relief;
+    float dy = (h_at(ix, iy + 1) - h_at(ix, iy - 1)) * 0.5 * pc.relief;
+    vec3 n = normalize(vec3(-dx, -dy, 1.0));
+    vec3 light = normalize(vec3(pc.sun_x, pc.sun_y, 0.55));
+    float shade = max(dot(n, light), 0.0);
+
+    vec3 dye = stain(s.w);
+
+    vec3 rgb = vec3(0.006, 0.010, 0.022);
+    rgb += (0.012 + 0.05 * s.x) * shade * (0.4 + 0.6 * dye);
+    rgb += s.z * 0.22 * dye;
+
+    if (s.y > 0.5) {
+        float fresh = exp(-(s.y - 1.0) * 0.25);
+        rgb = mix(dye * (0.55 + 0.35 * shade), vec3(1.0), 0.8 * fresh);
+    }
+
+    vec2 centred = vec2(fx, fy) * 2.0 - 1.0;
+    rgb *= smoothstep(1.55, 0.5, length(centred));
+
+    uint b = i * 15u;
+
+    vertices[b + 0u] = (fx * 2.0 - 1.0) * pc.extent;
+    vertices[b + 1u] = (fy * 2.0 - 1.0) * pc.extent;
+    vertices[b + 2u] = 0.0;
+
+    vertices[b + 3u] = rgb.r;
+    vertices[b + 4u] = rgb.g;
+    vertices[b + 5u] = rgb.b;
+
+    vertices[b + 6u] = pc.point_size * (0.85 + 0.4 * s.x);
+
+    vertices[b + 7u] = fx;
+    vertices[b + 8u] = fy;
+
+    vertices[b + 9u] = n.x;
+    vertices[b + 10u] = n.y;
+    vertices[b + 11u] = n.z;
+
+    vertices[b + 12u] = 1.0;
+    vertices[b + 13u] = 0.0;
+    vertices[b + 14u] = 0.0;
+}
