@@ -4,6 +4,8 @@ A machine of pure tones, clicks and noise whose score is written by cellular aut
 ringing drone, with a living picture that follows it. Sound and picture share one set of rules
 and one set of triggers, and the picture answers them late and in its own way.
 
+[![▶ A Hostile Topsoil](https://markdown-videos-api.jorgenkh.no/youtube/LdvbbOaLIfA?width=1920&height=1080)](https://youtu.be/LdvbbOaLIfA)
+
 Run it by including `src/Piece.hpp` and calling `Topsoil::topsoil()` from
 `user_project.hpp`. It needs a window and stereo output. No tablet, no camera.
 
