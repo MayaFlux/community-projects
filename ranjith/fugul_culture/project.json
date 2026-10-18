@@ -1,0 +1,6 @@
+{
+  "name": "Fugul Culture",
+  "themes": ["audiovisual", "generative", "organisms", "sound"],
+  "description": "A living colony of filament-like organisms and a resonant musical web, each shaping the other's motion, texture, and pace.",
+  "min_mayaflux_version": "0.5.0"
+}
