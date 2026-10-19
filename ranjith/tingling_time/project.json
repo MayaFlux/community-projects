@@ -1,0 +1,6 @@
+{
+  "name": "Tingling Time",
+  "themes": ["tablet", "camera", "audiovisual", "instrument", "performance"],
+  "description": "A pen on a tablet strikes bells and drones, and every strike pulls a moment from the last seconds of a camera back into the picture, so the piece watches itself being played.",
+  "min_mayaflux_version": "0.5.0"
+}

@@ -16,7 +16,7 @@ Each is drawn from a continuous tangle of fine lines. Bodies pulse and turn; rip
 
 The sound moves through a web of thirty-two resonant strands. Six independent walkers explore its pitches in overlapping patterns, making a shifting fugue of pure tones, short clicks, and pulse trains. There is no added noise: each sound is a strike that rings out through the web.
 
-The voices enter one by one, twelve seconds apart. Their shared contour keeps returning in different shapes—as an answer, a reversal, an inversion, or a doubled figure—while the pace gradually quickens. Two voices weave complementary rhythms together, and the notes slowly beat between the two stereo channels.
+The voices enter one by one, twelve seconds apart. Their shared contour keeps returning in different shapes (as an answer, a reversal, an inversion, or a doubled figure) while the pace gradually quickens. Two voices weave complementary rhythms together, and the notes slowly beat between the two stereo channels.
 
 ## One living composition
 
